@@ -1,0 +1,11 @@
+# Compiled binaries
+*.exe
+*.out
+*.o
+*.obj
+
+# Debug files
+*.pdb
+
+# IDE settings
+.vscode/
