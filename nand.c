@@ -81,6 +81,27 @@ NANDStatus nand_erase(NANDFlash *nand, int block)
     return NAND_OK;
 }
 
+NANDStatus nand_invalidate(NANDFlash *nand, int block, int page)
+{
+    if (nand == NULL) {
+        return NAND_ERROR_NULL_POINTER;
+    }
+
+    if (!is_valid_block(block) || !is_valid_page(page)) {
+        return NAND_ERROR_INVALID_ADDRESS;
+    }
+
+    NANDPage *target = &nand->blocks[block].pages[page];
+
+    if (target->state != NAND_PAGE_PROGRAMMED) {
+        return NAND_ERROR_PAGE_NOT_VALID;
+    }
+
+    target->state = NAND_PAGE_INVALID;
+
+    return NAND_OK;
+}
+
 void nand_print(const NANDFlash *nand)
 {
     if (nand == NULL) {
@@ -95,9 +116,14 @@ void nand_print(const NANDFlash *nand)
             const NANDPage *page = &nand->blocks[b].pages[p];
             if (page->state == NAND_PAGE_ERASED) {
                 printf("  Page %d: ERASED\n", p);
-            } else {
-                printf("  Page %d: PROGRAMMED, data=%u\n", p,
-                       (unsigned)page->data);
+
+            } else if (page->state == NAND_PAGE_PROGRAMMED) {
+                printf("  Page %d: PROGRAMMED, data=%u\n",
+                    p, (unsigned)page->data);
+
+            } else if (page->state == NAND_PAGE_INVALID) {
+                printf("  Page %d: INVALID, old_data=%u\n",
+                    p, (unsigned)page->data);
             }
         }
     }

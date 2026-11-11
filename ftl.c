@@ -31,24 +31,41 @@ FTLStatus ftl_write(FTL *ftl, int lpn, uint32_t data)
         return FTL_ERROR_INVALID_LPN;
     }
 
-    if (ftl->l2p[lpn] != FTL_INVALID_PPN) {
-        return FTL_ERROR_ALREADY_WRITTEN;
-    }
-
-    if (ftl->next_free_ppn >= FTL_LOGICAL_PAGE_COUNT) {
+    if (ftl->next_free_ppn >= FTL_PHYSICAL_PAGE_COUNT) {
         return FTL_ERROR_NO_FREE_PAGE;
     }
 
-    int ppn = ftl->next_free_ppn;
+    int old_ppn = ftl->l2p[lpn];
+    int new_ppn = ftl->next_free_ppn;
 
-    int block = ppn / NAND_PAGES_PER_BLOCK;
-    int page = ppn % NAND_PAGES_PER_BLOCK;
+    int new_block = new_ppn / NAND_PAGES_PER_BLOCK;
+    int new_page = new_ppn % NAND_PAGES_PER_BLOCK;
 
-    if (nand_program(&ftl->nand, block, page, data) != NAND_OK) {
+    // Program the new physical page first
+    if (nand_program(&ftl->nand, new_block, new_page, data)
+        != NAND_OK) {
         return FTL_ERROR_NAND;
     }
 
-    ftl->l2p[lpn] = ppn;
+    // Invalidate the previous physical page if one exists
+    if (old_ppn != FTL_INVALID_PPN) {
+        int old_block = old_ppn / NAND_PAGES_PER_BLOCK;
+        int old_page = old_ppn % NAND_PAGES_PER_BLOCK;
+
+        if (nand_invalidate(&ftl->nand, old_block, old_page)
+            != NAND_OK) {
+
+            // The new page is already programmed.
+            // Mark it invalid and skip this consumed PPN.
+            (void)nand_invalidate(&ftl->nand, new_block, new_page);
+            ftl->next_free_ppn++;
+
+            return FTL_ERROR_NAND;
+        }
+    }
+
+    // Commit the new mapping
+    ftl->l2p[lpn] = new_ppn;
     ftl->next_free_ppn++;
 
     return FTL_OK;

@@ -9,7 +9,8 @@
 
 typedef enum {
     NAND_PAGE_ERASED = 0,
-    NAND_PAGE_PROGRAMMED // 0 + 1 = 1
+    NAND_PAGE_PROGRAMMED,
+    NAND_PAGE_INVALID
 } NANDPageState;
 
 typedef enum {
@@ -17,7 +18,8 @@ typedef enum {
     NAND_ERROR_NULL_POINTER,
     NAND_ERROR_INVALID_ADDRESS,
     NAND_ERROR_PAGE_NOT_PROGRAMMED,
-    NAND_ERROR_PAGE_ALREADY_PROGRAMMED
+    NAND_ERROR_PAGE_ALREADY_PROGRAMMED,
+    NAND_ERROR_PAGE_NOT_VALID
 } NANDStatus;
 
 typedef struct {
@@ -51,6 +53,12 @@ NANDStatus nand_read(
 );
 
 NANDStatus nand_erase(NANDFlash *nand, int block);
+
+NANDStatus nand_invalidate(
+    NANDFlash *nand,
+    int block,
+    int page
+);
 
 void nand_print(const NANDFlash *nand);
 
