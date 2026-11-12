@@ -361,6 +361,119 @@ static void test_ftl_failed_invalidation(void)
     assert(ftl.nand.blocks[0].pages[1].data == 800);
 }
 
+static void test_gc_empty(void)
+{
+    FTL ftl;
+    FTLBlockStats stats;
+    int victim = -1;
+
+    ftl_init(&ftl);
+
+    assert(ftl_gc_get_block_stats(&ftl, 0, &stats) == FTL_OK);
+    assert(stats.erased_pages == 4);
+    assert(stats.valid_pages == 0);
+    assert(stats.invalid_pages == 0);
+
+    assert(ftl_gc_select_victim(&ftl, &victim)
+           == FTL_ERROR_NO_GC_VICTIM);
+    assert(victim == -1);
+}
+
+static void test_gc_select_victim(void)
+{
+    FTL ftl;
+    FTLBlockStats stats;
+    int victim = -1;
+
+    ftl_init(&ftl);
+
+    assert(ftl_write(&ftl, 0, 100) == FTL_OK);
+    assert(ftl_write(&ftl, 1, 200) == FTL_OK);
+    assert(ftl_write(&ftl, 0, 300) == FTL_OK);
+    assert(ftl_write(&ftl, 2, 400) == FTL_OK);
+    assert(ftl_write(&ftl, 3, 500) == FTL_OK);
+    assert(ftl_write(&ftl, 3, 600) == FTL_OK);
+
+    assert(ftl_gc_get_block_stats(&ftl, 0, &stats) == FTL_OK);
+    assert(stats.erased_pages == 0);
+    assert(stats.valid_pages == 3);
+    assert(stats.invalid_pages == 1);
+
+    assert(ftl_gc_get_block_stats(&ftl, 1, &stats) == FTL_OK);
+    assert(stats.erased_pages == 2);
+    assert(stats.valid_pages == 1);
+    assert(stats.invalid_pages == 1);
+
+    assert(ftl_gc_select_victim(&ftl, &victim) == FTL_OK);
+    assert(victim == 1);
+}
+
+static void test_gc_full_invalid_block(void)
+{
+    FTL ftl;
+    int victim = -1;
+
+    ftl_init(&ftl);
+
+    for (int lpn = 0; lpn < FTL_LOGICAL_PAGE_COUNT; lpn++) {
+        assert(ftl_write(&ftl, lpn, (uint32_t)(1000 + lpn))
+               == FTL_OK);
+    }
+
+    for (int lpn = 0; lpn < FTL_RESERVED_PAGE_COUNT; lpn++) {
+        assert(ftl_write(&ftl, lpn, (uint32_t)(2000 + lpn))
+               == FTL_OK);
+    }
+
+    assert(ftl_gc_select_victim(&ftl, &victim) == FTL_OK);
+    assert(victim == 0);
+}
+
+static void test_gc_full_no_migration_space(void)
+{
+    FTL ftl;
+    int victim = -1;
+
+    ftl_init(&ftl);
+
+    for (int lpn = 0; lpn < FTL_LOGICAL_PAGE_COUNT; lpn++) {
+        assert(ftl_write(&ftl, lpn, (uint32_t)(1000 + lpn))
+               == FTL_OK);
+    }
+
+    assert(ftl_write(&ftl, 0, 2000) == FTL_OK);
+    assert(ftl_write(&ftl, 1, 2001) == FTL_OK);
+    assert(ftl_write(&ftl, 4, 2004) == FTL_OK);
+    assert(ftl_write(&ftl, 5, 2005) == FTL_OK);
+
+    assert(ftl_gc_select_victim(&ftl, &victim)
+           == FTL_ERROR_NO_GC_VICTIM);
+    assert(victim == -1);
+}
+
+static void test_gc_invalid_arguments(void)
+{
+    FTL ftl;
+    FTLBlockStats stats;
+    int victim = -1;
+
+    ftl_init(&ftl);
+
+    assert(ftl_gc_get_block_stats(NULL, 0, &stats)
+           == FTL_ERROR_NULL_POINTER);
+    assert(ftl_gc_get_block_stats(&ftl, 0, NULL)
+           == FTL_ERROR_NULL_POINTER);
+    assert(ftl_gc_get_block_stats(&ftl, -1, &stats)
+           == FTL_ERROR_INVALID_BLOCK);
+    assert(ftl_gc_get_block_stats(&ftl, NAND_BLOCK_COUNT, &stats)
+           == FTL_ERROR_INVALID_BLOCK);
+
+    assert(ftl_gc_select_victim(NULL, &victim)
+           == FTL_ERROR_NULL_POINTER);
+    assert(ftl_gc_select_victim(&ftl, NULL)
+           == FTL_ERROR_NULL_POINTER);
+}
+
 int main(void)
 {
     RUN_TEST(test_init);
@@ -386,12 +499,12 @@ int main(void)
     RUN_TEST(test_ftl_failed_update_program);
     RUN_TEST(test_ftl_failed_invalidation);
 
-    FTL demo;
-    ftl_init(&demo);
-    assert(ftl_write(&demo, 3, 500) == FTL_OK);
-    assert(ftl_write(&demo, 3, 800) == FTL_OK);
-    nand_print(&demo.nand);
+    RUN_TEST(test_gc_empty);
+    RUN_TEST(test_gc_select_victim);
+    RUN_TEST(test_gc_full_invalid_block);
+    RUN_TEST(test_gc_full_no_migration_space);
+    RUN_TEST(test_gc_invalid_arguments);
 
-    printf("\nAll Stage 1-3 tests passed!\n");
+    printf("\nAll Stage 1-4 tests passed!\n");
     return 0;
 }

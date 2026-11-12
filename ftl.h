@@ -20,8 +20,16 @@ typedef enum {
     FTL_ERROR_INVALID_LPN,
     FTL_ERROR_UNMAPPED_LPN,
     FTL_ERROR_NO_FREE_PAGE,
-    FTL_ERROR_NAND
+    FTL_ERROR_NAND,
+    FTL_ERROR_INVALID_BLOCK,
+    FTL_ERROR_NO_GC_VICTIM
 } FTLStatus;
+
+typedef struct {
+    int erased_pages;
+    int valid_pages;
+    int invalid_pages;
+} FTLBlockStats;
 
 typedef struct {
     NANDFlash nand;
@@ -34,5 +42,16 @@ void ftl_init(FTL *ftl);
 FTLStatus ftl_write(FTL *ftl, int lpn, uint32_t data);
 
 FTLStatus ftl_read(const FTL *ftl, int lpn, uint32_t *data);
+
+FTLStatus ftl_gc_get_block_stats(
+    const FTL *ftl,
+    int block,
+    FTLBlockStats *stats
+);
+
+FTLStatus ftl_gc_select_victim(
+    const FTL *ftl,
+    int *victim_block
+);
 
 #endif
