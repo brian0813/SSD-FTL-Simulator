@@ -14,6 +14,8 @@
 
 #define FTL_INVALID_PPN (-1)
 
+#define FTL_GC_LOW_WATERMARK (NAND_PAGES_PER_BLOCK - 1)
+
 typedef enum {
     FTL_OK = 0,
     FTL_ERROR_NULL_POINTER,
@@ -22,7 +24,8 @@ typedef enum {
     FTL_ERROR_NO_FREE_PAGE,
     FTL_ERROR_NAND,
     FTL_ERROR_INVALID_BLOCK,
-    FTL_ERROR_NO_GC_VICTIM
+    FTL_ERROR_NO_GC_VICTIM,
+    FTL_ERROR_GC_BLOCK_NOT_READY
 } FTLStatus;
 
 typedef struct {
@@ -53,5 +56,17 @@ FTLStatus ftl_gc_select_victim(
     const FTL *ftl,
     int *victim_block
 );
+
+FTLStatus ftl_gc_migrate_valid_pages(
+    FTL *ftl,
+    int victim_block
+);
+
+FTLStatus ftl_gc_erase_victim(
+    FTL *ftl,
+    int victim_block
+);
+
+FTLStatus ftl_gc_collect(FTL *ftl);
 
 #endif
