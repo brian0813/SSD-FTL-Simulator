@@ -241,35 +241,35 @@ FTLStatus ftl_gc_select_victim(const FTL *ftl, int *victim_block)
     FTLBlockStats stats[NAND_BLOCK_COUNT];
     int total_erased = 0;
 
-    // Step 1: Count all NAND block states.
     for (int block = 0; block < NAND_BLOCK_COUNT; block++) {
         FTLStatus status = ftl_gc_get_block_stats(ftl, block, &stats[block]);
-
         if (status != FTL_OK) {
             return status;
         }
-
         total_erased += stats[block].erased_pages;
     }
 
     int best_block = -1;
     int best_invalid = -1;
     int best_valid = NAND_PAGES_PER_BLOCK + 1;
+    uint32_t best_erase_count = UINT32_MAX;
 
-    // Step 2: Find a victim with sufficient migration space.
     for (int block = 0; block < NAND_BLOCK_COUNT; block++) {
         int free_outside = total_erased - stats[block].erased_pages;
-
-        if (stats[block].invalid_pages == 0 || stats[block].valid_pages > free_outside) {
+        if (stats[block].invalid_pages == 0 ||
+            stats[block].valid_pages > free_outside) {
             continue;
         }
 
-        if (stats[block].invalid_pages > best_invalid ||
-            (stats[block].invalid_pages == best_invalid && stats[block].valid_pages < best_valid)) {
+        uint32_t erase_count = ftl->nand.blocks[block].erase_count;
 
+        if (stats[block].invalid_pages > best_invalid ||
+            (stats[block].invalid_pages == best_invalid && stats[block].valid_pages < best_valid) ||
+            (stats[block].invalid_pages == best_invalid && stats[block].valid_pages == best_valid && erase_count < best_erase_count)) {
             best_block = block;
             best_invalid = stats[block].invalid_pages;
             best_valid = stats[block].valid_pages;
+            best_erase_count = erase_count;
         }
     }
 

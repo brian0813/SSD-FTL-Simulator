@@ -1018,6 +1018,104 @@ static void test_wl_stats_null_pointer(void)
     assert(ftl_wl_get_stats(&ftl, NULL) == FTL_ERROR_NULL_POINTER);
 }
 
+static void seed_wl_equal_cost_layout(FTL *ftl)
+{
+    ftl_init(ftl);
+
+    for (int i = 0; i < 3; i++) {
+        assert(nand_erase(&ftl->nand, 0) == NAND_OK);
+    }
+    assert(nand_erase(&ftl->nand, 2) == NAND_OK);
+
+    assert(nand_program(&ftl->nand, 0, 0, 100) == NAND_OK);
+    assert(nand_program(&ftl->nand, 0, 1, 101) == NAND_OK);
+    assert(nand_program(&ftl->nand, 1, 0, 200) == NAND_OK);
+    assert(nand_program(&ftl->nand, 1, 1, 201) == NAND_OK);
+    assert(nand_invalidate(&ftl->nand, 0, 0) == NAND_OK);
+    assert(nand_invalidate(&ftl->nand, 1, 0) == NAND_OK);
+
+    ftl->l2p[0] = 1;
+    ftl->l2p[1] = 5;
+}
+
+// Stage 5 - Step 2: Wear-Aware GC
+static void test_wl_gc_prefers_less_worn_block(void)
+{
+    FTL ftl;
+    int victim_block = -1;
+    seed_wl_equal_cost_layout(&ftl);
+
+    assert(ftl.nand.blocks[0].erase_count == 3);
+    assert(ftl.nand.blocks[1].erase_count == 0);
+    assert(ftl_gc_select_victim(&ftl, &victim_block) == FTL_OK);
+    assert(victim_block == 1);
+}
+
+static void test_wl_gc_invalid_priority(void)
+{
+    FTL ftl;
+    int victim_block = -1;
+    seed_wl_equal_cost_layout(&ftl);
+
+    assert(nand_program(&ftl.nand, 0, 2, 300) == NAND_OK);
+    assert(nand_invalidate(&ftl.nand, 0, 2) == NAND_OK);
+
+    assert(ftl_gc_select_victim(&ftl, &victim_block) == FTL_OK);
+    assert(victim_block == 0);
+}
+
+static void test_wl_gc_valid_priority(void)
+{
+    FTL ftl;
+    int victim_block = -1;
+    seed_wl_equal_cost_layout(&ftl);
+
+    assert(nand_program(&ftl.nand, 1, 2, 300) == NAND_OK);
+    ftl.l2p[2] = 6;
+
+    assert(ftl_gc_select_victim(&ftl, &victim_block) == FTL_OK);
+    assert(victim_block == 0);
+}
+
+static void test_wl_gc_equal_wear_keeps_order(void)
+{
+    FTL ftl;
+    int victim_block = -1;
+    ftl_init(&ftl);
+
+    assert(nand_program(&ftl.nand, 0, 0, 100) == NAND_OK);
+    assert(nand_invalidate(&ftl.nand, 0, 0) == NAND_OK);
+    assert(nand_program(&ftl.nand, 1, 0, 200) == NAND_OK);
+    assert(nand_invalidate(&ftl.nand, 1, 0) == NAND_OK);
+
+    assert(ftl_gc_select_victim(&ftl, &victim_block) == FTL_OK);
+    assert(victim_block == 0);
+}
+
+static void test_wl_gc_collect_preserves_data(void)
+{
+    FTL ftl;
+    FTLWearStats stats = {0};
+    uint32_t value = 0;
+    seed_wl_equal_cost_layout(&ftl);
+
+    assert(ftl_gc_collect(&ftl) == FTL_OK);
+    assert(ftl.nand.blocks[0].erase_count == 3);
+    assert(ftl.nand.blocks[1].erase_count == 1);
+    assert(ftl.l2p[0] == 1);
+    assert(ftl.l2p[1] != 5);
+
+    assert(ftl_read(&ftl, 0, &value) == FTL_OK);
+    assert(value == 101);
+    assert(ftl_read(&ftl, 1, &value) == FTL_OK);
+    assert(value == 201);
+
+    assert(ftl_wl_get_stats(&ftl, &stats) == FTL_OK);
+    assert(stats.min_erase_count == 1);
+    assert(stats.max_erase_count == 3);
+    assert(stats.wear_gap == 2);
+}
+
 int main(void)
 {
     // Stage 1: NAND Flash Model
@@ -1075,10 +1173,17 @@ int main(void)
     RUN_TEST(test_ftl_gc_detect_corrupted_mapping);
     RUN_TEST(test_ftl_gc_repeated_updates);
 
+    // Stage 5: Wear-Aware GC
     RUN_TEST(test_wl_stats_initial);
     RUN_TEST(test_wl_stats_uneven);
     RUN_TEST(test_wl_stats_after_gc);
     RUN_TEST(test_wl_stats_null_pointer);
+
+    RUN_TEST(test_wl_gc_prefers_less_worn_block);
+    RUN_TEST(test_wl_gc_invalid_priority);
+    RUN_TEST(test_wl_gc_valid_priority);
+    RUN_TEST(test_wl_gc_equal_wear_keeps_order);
+    RUN_TEST(test_wl_gc_collect_preserves_data);
 
     printf("\nAll tests through Stage 4 Step 4 passed!\n");
     return 0;
