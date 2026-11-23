@@ -943,6 +943,81 @@ static void test_ftl_gc_repeated_updates(void)
     assert(total_erases > 0);
 }
 
+ // Stage 5 - Wear Statistics
+static void test_wl_stats_initial(void)
+{
+    FTL ftl;
+    FTLWearStats stats = {0};
+    ftl_init(&ftl);
+
+    assert(ftl_wl_get_stats(&ftl, &stats) == FTL_OK);
+    assert(stats.min_erase_count == 0);
+    assert(stats.max_erase_count == 0);
+    assert(stats.wear_gap == 0);
+    assert(stats.min_block == 0);
+    assert(stats.max_block == 0);
+}
+
+static void test_wl_stats_uneven(void)
+{
+    FTL ftl;
+    FTLWearStats stats = {0};
+    ftl_init(&ftl);
+
+    assert(nand_erase(&ftl.nand, 0) == NAND_OK);
+    assert(nand_erase(&ftl.nand, 0) == NAND_OK);
+    assert(nand_erase(&ftl.nand, 2) == NAND_OK);
+
+    assert(ftl_wl_get_stats(&ftl, &stats) == FTL_OK);
+    assert(stats.min_erase_count == 0);
+    assert(stats.max_erase_count == 2);
+    assert(stats.wear_gap == 2);
+    assert(stats.min_block == 1);
+    assert(stats.max_block == 0);
+}
+
+static void test_wl_stats_after_gc(void)
+{
+    FTL ftl;
+    FTLWearStats stats = {0};
+    uint32_t value = 0;
+    ftl_init(&ftl);
+
+    for (int lpn = 0; lpn < FTL_LOGICAL_PAGE_COUNT; lpn++) {
+        assert(ftl_write(&ftl, lpn, (uint32_t)(1000 + lpn)) == FTL_OK);
+    }
+
+    assert(ftl_write(&ftl, 0, 2000) == FTL_OK);
+    assert(ftl_write(&ftl, 1, 3000) == FTL_OK);
+    assert(ftl_wl_get_stats(&ftl, &stats) == FTL_OK);
+    assert(stats.min_erase_count == 0);
+    assert(stats.max_erase_count == 1);
+    assert(stats.wear_gap == 1);
+    assert(stats.min_block == 1);
+    assert(stats.max_block == 0);
+
+    for (int lpn = 0; lpn < FTL_LOGICAL_PAGE_COUNT; lpn++) {
+        uint32_t expected = (uint32_t)(1000 + lpn);
+        if (lpn == 0) {
+            expected = 2000;
+        } else if (lpn == 1) {
+            expected = 3000;
+        }
+        assert(ftl_read(&ftl, lpn, &value) == FTL_OK);
+        assert(value == expected);
+    }
+}
+
+static void test_wl_stats_null_pointer(void)
+{
+    FTL ftl;
+    FTLWearStats stats = {0};
+    ftl_init(&ftl);
+
+    assert(ftl_wl_get_stats(NULL, &stats) == FTL_ERROR_NULL_POINTER);
+    assert(ftl_wl_get_stats(&ftl, NULL) == FTL_ERROR_NULL_POINTER);
+}
+
 int main(void)
 {
     // Stage 1: NAND Flash Model
@@ -971,34 +1046,39 @@ int main(void)
     RUN_TEST(test_ftl_failed_update_program);
     RUN_TEST(test_ftl_failed_invalidation);
 
-    // Stage 4 - Step 1: Victim Selection
+    // Stage 4: Victim Selection
     RUN_TEST(test_gc_empty);
     RUN_TEST(test_gc_select_victim);
     RUN_TEST(test_gc_full_invalid_block);
     RUN_TEST(test_gc_full_no_migration_space);
     RUN_TEST(test_gc_invalid_arguments);
 
-    // Stage 4 - Step 2: Valid Page Migration
+    // Valid Page Migration
     RUN_TEST(test_gc_migrate_one_page);
     RUN_TEST(test_gc_migrate_two_pages);
     RUN_TEST(test_gc_full_invalid_victim);
     RUN_TEST(test_gc_no_space_preflight);
     RUN_TEST(test_gc_orphan_and_invalid_args);
 
-    // Stage 4 - Step 3: Safe Block Erase
+    // Safe Block Erase
     RUN_TEST(test_gc_erase_after_migration);
     RUN_TEST(test_gc_erase_reject_valid_page);
     RUN_TEST(test_gc_erase_full_invalid_block);
     RUN_TEST(test_gc_erase_reject_stale_l2p);
     RUN_TEST(test_gc_erase_invalid_args);
 
-    // Stage 4 - Step 4: Free Page Reuse and Automatic GC
+    // Free Page Reuse and Automatic GC
     RUN_TEST(test_ftl_gc_auto_trigger);
     RUN_TEST(test_ftl_gc_wraparound);
     RUN_TEST(test_ftl_gc_manual_collect);
     RUN_TEST(test_ftl_gc_full_no_victim);
     RUN_TEST(test_ftl_gc_detect_corrupted_mapping);
     RUN_TEST(test_ftl_gc_repeated_updates);
+
+    RUN_TEST(test_wl_stats_initial);
+    RUN_TEST(test_wl_stats_uneven);
+    RUN_TEST(test_wl_stats_after_gc);
+    RUN_TEST(test_wl_stats_null_pointer);
 
     printf("\nAll tests through Stage 4 Step 4 passed!\n");
     return 0;

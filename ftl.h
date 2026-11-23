@@ -35,6 +35,14 @@ typedef struct {
 } FTLBlockStats;
 
 typedef struct {
+    uint32_t min_erase_count;
+    uint32_t max_erase_count;
+    uint32_t wear_gap;
+    int min_block;
+    int max_block;
+} FTLWearStats;
+
+typedef struct {
     NANDFlash nand;
     int l2p[FTL_LOGICAL_PAGE_COUNT];
     int next_free_ppn;
@@ -68,5 +76,7 @@ FTLStatus ftl_gc_erase_victim(
 );
 
 FTLStatus ftl_gc_collect(FTL *ftl);
+
+FTLStatus ftl_wl_get_stats(const FTL *ftl, FTLWearStats *stats);
 
 #endif

@@ -514,3 +514,31 @@ FTLStatus ftl_gc_collect(FTL *ftl)
     // Step 3：擦除 Victim Block，並將擦除結果回傳給呼叫者
     return ftl_gc_erase_victim(ftl, victim_block);
 }
+
+FTLStatus ftl_wl_get_stats(const FTL *ftl, FTLWearStats *stats)
+{
+    if (ftl == NULL || stats == NULL) {
+        return FTL_ERROR_NULL_POINTER;
+    }
+
+    FTLWearStats result = {0};
+    result.min_erase_count = ftl->nand.blocks[0].erase_count;
+    result.max_erase_count = result.min_erase_count;
+
+    for (int block = 1; block < NAND_BLOCK_COUNT; block++) {
+        uint32_t count = ftl->nand.blocks[block].erase_count;
+
+        if (count < result.min_erase_count) {
+            result.min_erase_count = count;
+            result.min_block = block;
+        }
+        if (count > result.max_erase_count) {
+            result.max_erase_count = count;
+            result.max_block = block;
+        }
+    }
+
+    result.wear_gap = result.max_erase_count - result.min_erase_count;
+    *stats = result;
+    return FTL_OK;
+}
