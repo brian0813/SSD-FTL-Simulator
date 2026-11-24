@@ -16,6 +16,9 @@
 
 #define FTL_GC_LOW_WATERMARK (NAND_PAGES_PER_BLOCK - 1)
 
+// Teaching-model threshold: start static wear leveling at a five-erase gap.
+#define FTL_WL_STATIC_THRESHOLD 5U
+
 typedef enum {
     FTL_OK = 0,
     FTL_ERROR_NULL_POINTER,
@@ -25,7 +28,8 @@ typedef enum {
     FTL_ERROR_NAND,
     FTL_ERROR_INVALID_BLOCK,
     FTL_ERROR_NO_GC_VICTIM,
-    FTL_ERROR_GC_BLOCK_NOT_READY
+    FTL_ERROR_GC_BLOCK_NOT_READY,
+    FTL_ERROR_NO_WL_CANDIDATE
 } FTLStatus;
 
 typedef struct {
@@ -78,5 +82,7 @@ FTLStatus ftl_gc_erase_victim(
 FTLStatus ftl_gc_collect(FTL *ftl);
 
 FTLStatus ftl_wl_get_stats(const FTL *ftl, FTLWearStats *stats);
+
+FTLStatus ftl_wl_static_collect(FTL *ftl);
 
 #endif

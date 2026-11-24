@@ -281,7 +281,7 @@ FTLStatus ftl_gc_select_victim(const FTL *ftl, int *victim_block)
     return FTL_OK;
 }
 
-FTLStatus ftl_gc_migrate_valid_pages(FTL *ftl, int victim_block)
+static FTLStatus migrate_valid_pages(FTL *ftl, int victim_block, int require_invalid)
 {
     // 1. Validate arguments.
     if (ftl == NULL) {
@@ -301,8 +301,11 @@ FTLStatus ftl_gc_migrate_valid_pages(FTL *ftl, int victim_block)
     if (status != FTL_OK) {
         return status;
     }
-    if (stats.invalid_pages == 0) {
+    if (require_invalid && stats.invalid_pages == 0) {
         return FTL_ERROR_NO_GC_VICTIM;
+    }
+    if (!require_invalid && stats.valid_pages == 0) {
+        return FTL_ERROR_NO_WL_CANDIDATE;
     }
 
     // 3. Check all L2P mappings.
@@ -422,6 +425,10 @@ FTLStatus ftl_gc_migrate_valid_pages(FTL *ftl, int victim_block)
     return FTL_OK;
 }
 
+FTLStatus ftl_gc_migrate_valid_pages(FTL *ftl, int victim_block)
+{
+    return migrate_valid_pages(ftl, victim_block, 1);
+}
 
 FTLStatus ftl_gc_erase_victim(FTL *ftl, int victim_block)
 {
@@ -540,5 +547,75 @@ FTLStatus ftl_wl_get_stats(const FTL *ftl, FTLWearStats *stats)
 
     result.wear_gap = result.max_erase_count - result.min_erase_count;
     *stats = result;
+    return FTL_OK;
+}
+
+FTLStatus ftl_wl_static_collect(FTL *ftl)
+{
+    if (ftl == NULL) {
+        return FTL_ERROR_NULL_POINTER;
+    }
+    if (ftl->next_free_ppn < 0 ||
+        ftl->next_free_ppn >= FTL_PHYSICAL_PAGE_COUNT ||
+        validate_mapping(ftl) != FTL_OK) {
+        return FTL_ERROR_NAND;
+    }
+
+    FTLWearStats wear = {0};
+    FTLStatus status = ftl_wl_get_stats(ftl, &wear);
+    if (status != FTL_OK) {
+        return status;
+    }
+    if (wear.wear_gap < FTL_WL_STATIC_THRESHOLD) {
+        return FTL_ERROR_NO_WL_CANDIDATE;
+    }
+
+    int cold_block = -1;
+    int best_valid = NAND_PAGES_PER_BLOCK + 1;
+    uint32_t best_wear = UINT32_MAX;
+    int total_erased = count_erased_pages(ftl);
+    int insufficient_space = 0;
+
+    for (int block = 0; block < NAND_BLOCK_COUNT; block++) {
+        FTLBlockStats stats = {0};
+        status = ftl_gc_get_block_stats(ftl, block, &stats);
+        if (status != FTL_OK) {
+            return status;
+        }
+
+        uint32_t erase_count = ftl->nand.blocks[block].erase_count;
+        if (stats.valid_pages == 0 || wear.max_erase_count - erase_count < FTL_WL_STATIC_THRESHOLD) {
+            continue;
+        }
+
+        int free_outside = total_erased - stats.erased_pages;
+        if (free_outside < stats.valid_pages) {
+            insufficient_space = 1;
+            continue;
+        }
+
+        if (erase_count < best_wear ||
+            (erase_count == best_wear && stats.valid_pages < best_valid)) {
+            cold_block = block;
+            best_wear = erase_count;
+            best_valid = stats.valid_pages;
+        }
+    }
+
+    if (cold_block < 0) {
+        return insufficient_space ? FTL_ERROR_NO_FREE_PAGE : FTL_ERROR_NO_WL_CANDIDATE;
+    }
+
+    status = migrate_valid_pages(ftl, cold_block, 0);
+    if (status != FTL_OK) {
+        return status;
+    }
+    status = ftl_gc_erase_victim(ftl, cold_block);
+    if (status != FTL_OK) {
+        return status;
+    }
+
+    // Reuse freshly erased low-wear pages for upcoming host writes.
+    ftl->next_free_ppn = cold_block * NAND_PAGES_PER_BLOCK;
     return FTL_OK;
 }
