@@ -47,9 +47,19 @@ typedef struct {
 } FTLWearStats;
 
 typedef struct {
+    uint64_t host_writes;
+    uint64_t nand_programs;
+    uint64_t gc_migrations;
+    uint64_t wl_migrations;
+    uint64_t gc_cycles;
+    uint64_t wl_cycles;
+} FTLPerfStats;
+
+typedef struct {
     NANDFlash nand;
     int l2p[FTL_LOGICAL_PAGE_COUNT];
     int next_free_ppn;
+    FTLPerfStats perf;
 } FTL;
 
 void ftl_init(FTL *ftl);

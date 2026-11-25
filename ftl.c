@@ -102,6 +102,7 @@ void ftl_init(FTL *ftl)
     }
 
     ftl->next_free_ppn = 0;
+    ftl->perf = (FTLPerfStats){0};
 }
 
 FTLStatus ftl_write(FTL *ftl, int lpn, uint32_t data)
@@ -149,6 +150,8 @@ FTLStatus ftl_write(FTL *ftl, int lpn, uint32_t data)
         return FTL_ERROR_NAND;
     }
 
+    ftl->perf.nand_programs++;
+
     if (old_ppn != FTL_INVALID_PPN) {
         int old_block = old_ppn / NAND_PAGES_PER_BLOCK;
         int old_page = old_ppn % NAND_PAGES_PER_BLOCK;
@@ -166,9 +169,8 @@ FTLStatus ftl_write(FTL *ftl, int lpn, uint32_t data)
     }
 
     ftl->l2p[lpn] = new_ppn;
-
     ftl->next_free_ppn = (new_ppn + 1) % FTL_PHYSICAL_PAGE_COUNT;
-
+    ftl->perf.host_writes++;
     return FTL_OK;
 }
 
@@ -290,7 +292,7 @@ static FTLStatus migrate_valid_pages(FTL *ftl, int victim_block, int require_inv
     if (victim_block < 0 || victim_block >= NAND_BLOCK_COUNT) {
         return FTL_ERROR_INVALID_BLOCK;
     }
-    if (ftl->next_free_ppn < 0 || ftl->next_free_ppn > FTL_PHYSICAL_PAGE_COUNT) {
+    if (ftl->next_free_ppn < 0 || ftl->next_free_ppn >= FTL_PHYSICAL_PAGE_COUNT) {
         return FTL_ERROR_NAND;
     }
 
@@ -394,10 +396,6 @@ static FTLStatus migrate_valid_pages(FTL *ftl, int victim_block, int require_inv
             return FTL_ERROR_NO_FREE_PAGE;
         }
 
-        if (new_ppn == FTL_INVALID_PPN) {
-            return FTL_ERROR_NO_FREE_PAGE;
-        }
-
         int new_block = new_ppn / NAND_PAGES_PER_BLOCK;
         int new_page = new_ppn % NAND_PAGES_PER_BLOCK;
 
@@ -405,6 +403,8 @@ static FTLStatus migrate_valid_pages(FTL *ftl, int victim_block, int require_inv
         if (nand_program(&ftl->nand, new_block, new_page, value) != NAND_OK) {
             return FTL_ERROR_NAND;
         }
+
+        ftl->perf.nand_programs++;
 
         // Invalidate the original page.
         if (nand_invalidate(&ftl->nand, victim_block, page) != NAND_OK) {
@@ -418,8 +418,13 @@ static FTLStatus migrate_valid_pages(FTL *ftl, int victim_block, int require_inv
 
         // Commit the new mapping.
         ftl->l2p[owner_lpn] = new_ppn;
-
         ftl->next_free_ppn = (new_ppn + 1) % FTL_PHYSICAL_PAGE_COUNT;
+
+        if (require_invalid) {
+            ftl->perf.gc_migrations++;
+        } else {
+            ftl->perf.wl_migrations++;
+        }
     }
 
     return FTL_OK;
@@ -518,8 +523,13 @@ FTLStatus ftl_gc_collect(FTL *ftl)
         return status;
     }
 
-    // Step 3：擦除 Victim Block，並將擦除結果回傳給呼叫者
-    return ftl_gc_erase_victim(ftl, victim_block);
+    status = ftl_gc_erase_victim(ftl, victim_block);
+
+    if (status == FTL_OK) {
+        ftl->perf.gc_cycles++;
+    }
+
+    return status;
 }
 
 FTLStatus ftl_wl_get_stats(const FTL *ftl, FTLWearStats *stats)
@@ -614,6 +624,8 @@ FTLStatus ftl_wl_static_collect(FTL *ftl)
     if (status != FTL_OK) {
         return status;
     }
+
+    ftl->perf.wl_cycles++;
 
     // Reuse freshly erased low-wear pages for upcoming host writes.
     ftl->next_free_ppn = cold_block * NAND_PAGES_PER_BLOCK;

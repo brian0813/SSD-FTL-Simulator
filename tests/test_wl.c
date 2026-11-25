@@ -347,6 +347,70 @@ static void test_wl_static_equal_wear_prefers_fewer_valid(void)
     assert(ftl.l2p[2] != 4);
 }
 
+ // Stage 5 - Step 4: Performance counters
+static void test_wl_perf_initial(void)
+{
+    FTL ftl;
+    ftl_init(&ftl);
+
+    assert(ftl.perf.host_writes == 0);
+    assert(ftl.perf.nand_programs == 0);
+    assert(ftl.perf.gc_migrations == 0);
+    assert(ftl.perf.wl_migrations == 0);
+    assert(ftl.perf.gc_cycles == 0);
+    assert(ftl.perf.wl_cycles == 0);
+}
+
+static void test_wl_perf_host_and_gc(void)
+{
+    FTL ftl;
+    ftl_init(&ftl);
+
+    assert(ftl_write(&ftl, 0, 100) == FTL_OK);
+    assert(ftl_write(&ftl, 0, 200) == FTL_OK);
+    assert(ftl_gc_collect(&ftl) == FTL_OK);
+    assert(ftl.perf.host_writes == 2);
+    assert(ftl.perf.gc_migrations == 1);
+    assert(ftl.perf.wl_migrations == 0);
+    assert(ftl.perf.nand_programs == 3);
+    assert(ftl.perf.gc_cycles == 1);
+    assert(ftl.perf.wl_cycles == 0);
+    assert(ftl.nand.blocks[0].erase_count == 1);
+}
+
+static void test_wl_perf_static_migration(void)
+{
+    FTL ftl;
+    seed_static_cold_block(&ftl);
+
+    assert(ftl.perf.host_writes == 4);
+    assert(ftl.perf.nand_programs == 4);
+    assert(ftl_wl_static_collect(&ftl) == FTL_OK);
+    assert(ftl.perf.host_writes == 4);
+    assert(ftl.perf.gc_migrations == 0);
+    assert(ftl.perf.wl_migrations == 4);
+    assert(ftl.perf.nand_programs == 8);
+    assert(ftl.perf.gc_cycles == 0);
+    assert(ftl.perf.wl_cycles == 1);
+    assert(ftl.nand.blocks[0].erase_count == 1);
+}
+
+static void test_wl_perf_rejected_operations(void)
+{
+    FTL ftl;
+    ftl_init(&ftl);
+
+    assert(ftl_write(&ftl, -1, 100) == FTL_ERROR_INVALID_LPN);
+    assert(ftl_gc_collect(&ftl) == FTL_ERROR_NO_GC_VICTIM);
+    assert(ftl_wl_static_collect(&ftl) == FTL_ERROR_NO_WL_CANDIDATE);
+    assert(ftl.perf.host_writes == 0);
+    assert(ftl.perf.nand_programs == 0);
+    assert(ftl.perf.gc_migrations == 0);
+    assert(ftl.perf.wl_migrations == 0);
+    assert(ftl.perf.gc_cycles == 0);
+    assert(ftl.perf.wl_cycles == 0);
+}
+
 void run_wl_tests(void)
 {
     RUN_TEST(test_wl_stats_initial);
@@ -365,4 +429,8 @@ void run_wl_tests(void)
     RUN_TEST(test_wl_static_skips_empty_cold_block);
     RUN_TEST(test_wl_static_rejects_invalid_state);
     RUN_TEST(test_wl_static_equal_wear_prefers_fewer_valid);
+    RUN_TEST(test_wl_perf_initial);
+    RUN_TEST(test_wl_perf_host_and_gc);
+    RUN_TEST(test_wl_perf_static_migration);
+    RUN_TEST(test_wl_perf_rejected_operations);
 }
